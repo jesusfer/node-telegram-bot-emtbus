@@ -35,3 +35,7 @@ jspm_packages
 
 # Optional REPL history
 .node_repl_history
+
+# Sublime stuff
+*.sublime-project
+*.sublime-workspace

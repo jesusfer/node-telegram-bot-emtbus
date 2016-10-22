@@ -1,0 +1,3 @@
+To update the XML files in this directory:
+- Base URL: http://opendata.emtmadrid.es/data/opendata/XML/
+- The name of the files is the same.

@@ -1,0 +1,36 @@
+{
+  "name": "node-telegram-bot-emtbus",
+  "version": "1.0.0",
+  "description": "Telegram bot that runs in node.js. The purpose of the bot is to reply to inline requests and return bus arrival estimations to a certain bus stop in Madrid, Spain.",
+  "main": "index.js",
+  "scripts": {
+    "test": "grunt test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jesusfer/node-telegram-bot-emtbus.git"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "emt",
+    "bus",
+    "node"
+  ],
+  "author": "Jesús Fernández <jesus@nublar.net>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/jesusfer/node-telegram-bot-emtbus/issues"
+  },
+  "homepage": "https://github.com/jesusfer/node-telegram-bot-emtbus#readme",
+  "dependencies": {
+    "bluebird": "^3.4.6",
+    "debug": "^2.2.0",
+    "fs": "0.0.1-security",
+    "lodash": "^4.16.4",
+    "node-emtmad-bus-promise": "^1.0.0",
+    "node-telegram-bot-api": "^0.24.0",
+    "node-uuid": "^1.4.7",
+    "xml2js": "^0.4.17"
+  }
+}
