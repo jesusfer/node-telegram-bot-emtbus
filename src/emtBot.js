@@ -1,6 +1,5 @@
 // Copyright (c) 2016 Jesús Fernández <jesus@nublar.net>
 // MIT License
-
 'use strict';
 
 const settings = require('./settings.js');
@@ -39,8 +38,6 @@ const telemetryEvents = {
 const xmlStops = xml2json(settings.emt_nodesxml).TABLA.DocumentElement[0].REG;
 const xmlLines = xml2json(settings.emt_linesxml).TABLA.DocumentElement[0].REG;
 const searchRadius = 200;
-
-EMTAPI.initAPICredentials(settings.emt_app_id, settings.emt_passkey);
 
 // UTILS //////////////////////////////////////////////////////////////////////
 /**
