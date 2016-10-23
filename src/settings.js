@@ -6,9 +6,6 @@ const settings = {
 
     maxResults: 6, // 50 is the maximum allowed by Telegram
 
-    emt_app_id: process.env.EMT_APP_ID,
-    emt_passkey: process.env.EMT_PASSKEY,
-
     emt_linesxml: './data/Lines.xml',
     emt_nodesxml: './data/NodesLines.xml',
 

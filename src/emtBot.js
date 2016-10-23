@@ -1,6 +1,5 @@
 // Copyright (c) 2016 Jesús Fernández <jesus@nublar.net>
 // MIT License
-
 'use strict';
 
 const settings = require('./settings.js');
@@ -34,13 +33,14 @@ const telemetryEvents = {
     QueryWithText: 'QueryWithText'
 };
 
-// Init EMT API ///////////////////////////////////////////////////////////////
+// CONSTANTS //////////////////////////////////////////////////////////////////
 
 const xmlStops = xml2json(settings.emt_nodesxml).TABLA.DocumentElement[0].REG;
 const xmlLines = xml2json(settings.emt_linesxml).TABLA.DocumentElement[0].REG;
 const searchRadius = 200;
-
-EMTAPI.initAPICredentials(settings.emt_app_id, settings.emt_passkey);
+const emptyLocation = {latitude: 0, longitude: 0};
+// Properties of a stop that will be rendered in a table
+const columns = ['lineId', 'destination', 'time'];
 
 // UTILS //////////////////////////////////////////////////////////////////////
 /**
@@ -63,6 +63,7 @@ const getArrivingBuses = function (stop) {
     return new P(function (resolve) {
         EMTAPI.getIncomingBusesToStop(stop.Id)
             .then(function (arriving) {
+                arriving = _.concat([], arriving);
                 stop.arriving = _.map(arriving, function (bus) {
                     // Pretty print the arriving time
                     let time = bus.busTimeLeft;
@@ -74,14 +75,16 @@ const getArrivingBuses = function (stop) {
                     } else {
                         time = timeMin + ' min';
                     }
-                    bus.time = time;
+                    _.set(bus, 'time', time);
                     return bus;
                 });
                 resolve(stop);
             })
             .catch(function (error) {
+                console.error(error);
                 resolve(`Error: ${error}`);
             });
+
     });
 };
 
@@ -105,6 +108,24 @@ const getColumnWidths = function (stop, columns) {
         });
     });
     return format;
+};
+
+const getStopLocation = function (stopId, line, direction) {
+    debug(`Getting location for stop ${stopId} with line ${line} and direction ${direction}`);
+    return EMTAPI.getStopsLine(line, direction)
+        .then(function (results) {
+            let stops = _.get(results, 'stop', []);
+            let stop = stops.find(function (stop) {
+                return stop.stopId === stopId;
+            });
+            return {
+                latitude: stop.latitude,
+                longitude: stop.longitude
+            };
+        })
+        .catch(function (error) {
+            console.error(`Error: ${error}`);
+        });
 };
 
 /* Example of a stop object from the XML file
@@ -141,7 +162,9 @@ const buildStop = function (rawStop) {
             newStop.Id = nodeId;
             newStop.Name = _.get(rawStop, 'Name[0]', 'Nombre de la parada');
             let rawLines = _.get(rawStop, 'Lines[0]', '').split(' ');
+            let aLine = '';
             newStop.Lines = _.map(rawLines, function (rawLine) {
+                aLine = rawLine;
                 let temp = rawLine.split('/');
                 let label = findXmlLine(temp[0]).Label[0];
                 if (temp[1] === '1') {
@@ -150,8 +173,12 @@ const buildStop = function (rawStop) {
                     return `${label} vuelta`;
                 }
             });
+            getStopLocation(nodeId, aLine.split('/')[0], aLine.split('/')[1])
+                .then(function (position) {
+                    newStop.position = position;
+                    resolve(newStop);
+                });
         } else if (stopId !== -1) {
-            //debug(rawStop);
             // debug('Build from API');
             newStop.Id = stopId;
             newStop.Name = _.get(rawStop, 'name', 'Nombre de la parada');
@@ -163,10 +190,14 @@ const buildStop = function (rawStop) {
                     return `${label} vuelta`;
                 }
             });
+            newStop.position = {
+                latitude: rawStop.latitude,
+                longitude: rawStop.longitude
+            };
+            resolve(newStop);
         } else {
             reject('Bad raw stop');
         }
-        resolve(newStop);
     });
 };
 
@@ -182,7 +213,7 @@ const logErrors = function (query, id, error) {
 * close to the location of the user.
 * Returns a Promise object that fulfills to an array of Stops.
 */
-const findStops = function (query, location) {
+const findStops = function (query, location, exact = false) {
     return new P(function (resolve, reject) {
         let isEmptyQuery = false;
         let isLocationQuery = false;
@@ -213,10 +244,16 @@ const findStops = function (query, location) {
         if (!isEmptyQuery) {
             debug('Query is not empty, find a matching stop in the XML');
             telemetryClient.trackEvent(telemetryEvents.QueryWithText);
-            // Look for stops that start with that number in the DB
-            foundByQuery = _.slice(xmlStops.filter(function (o) {
+            let findFunction = function (o) {
                 return _.startsWith(o.Node, query);
-            }), 0, settings.maxResults);
+            };
+            if (exact) {
+                findFunction = function (o) {
+                    return o.Node[0] === query;
+                };
+            }
+            // Look for stops that start with that number in the DB
+            foundByQuery = _.slice(xmlStops.filter(findFunction), 0, settings.maxResults);
         }
 
         debug('Calling EMT API to get stops by location');
@@ -256,12 +293,62 @@ const findStops = function (query, location) {
             });
     });
 };
+// We want to format the estimations in a table that it's easier to read
+// We pad the column text with spaces and render each line with a monospace font
+const renderStop = function (stop) {
+    return new P(function (resolve) {
+        let arriving = "Sin estimaciones";
+        if (stop.arriving.length > 0) {
+            let widths = getColumnWidths(stop, columns);
+            arriving = _.join(_.map(stop.arriving, function (e) {
+                // Build the bus arriving line, padding the columns as needed
+                let keys = _.keys(widths);
+                let s = _.map(keys, function (w) {
+                    let value = _.get(e, w, '');
+                    value = _.truncate(value, {
+                        length: settings.maxColumnWidth
+                    });
+                    value = _.padEnd(value, widths[w], ' ');
+                    return value;
+                });
+                s = '`' + _.join(s, ' ') + '`';
+                return s;
+            }), '\r\n');
+        }
+        let url = `https://www.google.com/maps/@${stop.position.latitude},${stop.position.longitude},19z`;
+        const content = `*${stop.Id}* ${stop.Name}
+${arriving}
+
+[¿Dónde está la parada?](${url})`;
+        const result = {type: 'article'};
+        result.id = uuid.v4();
+        result.title = `${stop.Id} - ${stop.Name}`;
+        result.input_message_content = {
+            message_text: content,
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true
+        };
+        result.description = 'Líneas: ' + _.join(stop.Lines, ', ');
+        result.thumb_url = settings.result_thumb;
+        result.reply_markup = {
+            inline_keyboard: [[
+                {
+                    text: "Actualizar",
+                    callback_data: `refresh:${stop.Id}`
+                }
+            ]]
+        };
+        resolve(result);
+    });
+};
 
 // COMMANDS ///////////////////////////////////////////////////////////////////
 
 const helpText =
         'This bot is intended to be used in inline mode, just type ' +
-        '@emtbusbot and a bus stop number to get an estimation.';
+        '@emtbusbot and a bus stop number to get an estimation.' +
+        '\r\nIf you allow your Telegram client to send your location, ' +
+        'you will be shown a list of the bus stops closer to you.';
 
 bot.onText(/\/start.*/, function (msg) {
     bot.sendMessage(msg.from.id, helpText);
@@ -290,7 +377,7 @@ Arriving example
 bot.on('inline_query', function (request) {
     const inlineId = request.id;
     const query = request.query.trim();
-    const location = _.get(request, 'location', {latitude: 0, longitude: 0});
+    const location = _.get(request, 'location', emptyLocation);
     debug(`New inline query: ${query}`);
     debug(`Location: ${location.latitude} ${location.longitude}`);
 
@@ -309,52 +396,84 @@ bot.on('inline_query', function (request) {
                 // If the result is a String, then an error ocurred
                 return _.isString(result);
             });
-            // We want to format the estimations in a table that it's easier to read
-            // We pad the column text with spaces and render each line with a monospace font
-            let columns = ['lineId', 'destination', 'time'];
-            let results = _.map(stops, function (stop) {
-                let arriving = "Sin estimaciones";
-                if (stop.arriving.length > 0) {
-                    let widths = getColumnWidths(stop, columns);
-                    arriving = _.join(_.map(stop.arriving, function (e) {
-                        // Build the bus arriving line, padding the columns as needed
-                        let keys = _.keys(widths);
-                        let s = _.map(keys, function (w) {
-                            let value = _.get(e, w, '');
-                            value = _.truncate(value, {
-                                length: settings.maxColumnWidth
-                            });
-                            value = _.padEnd(value, widths[w], ' ');
-                            return value;
-                        });
-                        s = '`' + _.join(s, ' ') + '`';
-                        return s;
-                    }), '\r\n');
-                }
-                const content = `*${stop.Id}* ${stop.Name}\r\n${arriving}`;
-                const result = {type: 'article'};
-                result.id = uuid.v4();
-                result.title = `${stop.Id} - ${stop.Name}`;
-                result.input_message_content = {
-                    message_text: content,
-                    parse_mode: 'Markdown',
-                    disable_web_page_preview: true
-                };
-                result.description = 'Líneas: ' + _.join(stop.Lines, ', ');
-                result.thumb_url = settings.result_thumb;
-                return result;
-            });
+            return P.all(_.map(stops, renderStop));
+        })
+        .then(function (results) {
             debug(`Final results: ${results.length}`);
             bot.answerInlineQuery(inlineId, results, {cache_time: 10});
-        }, function (error) {
-            console.error(error);
-            telemetryClient.trackException(error);
         })
         .catch(function (error) {
-            logErrors(request.query, inlineId, error);
+            console.error(error);
             telemetryClient.trackException(error);
         });
     // logErrors(request.query, inlineId, 'No results');
+});
+
+const processRefresh = function (request, stopId) {
+    if (_.isNaN(+stopId)) {
+        debug('Bad refresh stopId');
+        return;
+    }
+    let answerText = 'Actualizando...';
+    bot.answerCallbackQuery(request.id, answerText);
+
+    // This is basically the same as in the inline query
+    findStops(stopId, emptyLocation, true)
+        .then(function (stops) {
+            if (stops.length !== 1) {
+                return P.reject('Error: more than one stop in refresh');
+                // This is a refresh, we should never get more than one result
+            }
+            return stops[0];
+        })
+        .then(getArrivingBuses)
+        .then(function (stop) {
+            if (_.isString(stop)) {
+                return P.reject('Error: getting arriving buses');
+            }
+            return stop;
+        })
+        .then(renderStop)
+        .then(function (result) {
+            bot.editMessageText(
+                result.input_message_content.message_text,
+                {
+                    inline_message_id: request.inline_message_id,
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [[
+                            {
+                                text: "Actualizar",
+                                callback_data: `refresh:${stopId}`
+                            }
+                        ]]
+                    }
+                }
+            );
+        })
+        .catch(function (error) {
+            console.error(error);
+            telemetryClient.trackException(error);
+        });
+};
+
+bot.on('callback_query', function (request) {
+    debug('New CallbackQuery');
+    const data = _.get(request, 'data', 0);
+    debug(`Callback query data: ${data}`);
+    try {
+        const operation = data.split(':')[0];
+        switch (operation) {
+        case 'refresh':
+            processRefresh(request, data.split(':')[1]);
+            break;
+        default:
+            bot.answerCallbackQuery(request.id);
+        }
+    } catch (error) {
+        console.error(`Bad callback data: ${error}`);
+        bot.answerCallbackQuery(request.id);
+    }
 });
 
 module.exports = bot;
