@@ -1,6 +1,6 @@
 {
   "name": "node-telegram-bot-emtbus",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Telegram bot that runs in node.js. The purpose of the bot is to reply to inline requests and return bus arrival estimations to a certain bus stop in Madrid, Spain.",
   "main": "index.js",
   "scripts": {
