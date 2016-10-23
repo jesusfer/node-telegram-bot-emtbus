@@ -60,6 +60,7 @@ const getArrivingBuses = function (stop) {
     return new P(function (resolve) {
         EMTAPI.getIncomingBusesToStop(stop.Id)
             .then(function (arriving) {
+                arriving = _.concat([], arriving);
                 stop.arriving = _.map(arriving, function (bus) {
                     // Pretty print the arriving time
                     let time = bus.busTimeLeft;
@@ -71,14 +72,16 @@ const getArrivingBuses = function (stop) {
                     } else {
                         time = timeMin + ' min';
                     }
-                    bus.time = time;
+                    _.set(bus, 'time', time);
                     return bus;
                 });
                 resolve(stop);
             })
             .catch(function (error) {
+                console.error(error);
                 resolve(`Error: ${error}`);
             });
+
     });
 };
 
@@ -102,6 +105,24 @@ const getColumnWidths = function (stop, columns) {
         });
     });
     return format;
+};
+
+const getStopLocation = function (stopId, line, direction) {
+    debug(`Getting location for stop ${stopId} with line ${line} and direction ${direction}`);
+    return EMTAPI.getStopsLine(line, direction)
+        .then(function (results) {
+            let stops = _.get(results, 'stop', []);
+            let stop = stops.find(function (stop) {
+                return stop.stopId === stopId;
+            });
+            return {
+                latitude: stop.latitude,
+                longitude: stop.longitude
+            };
+        })
+        .catch(function (error) {
+            console.error(`Error: ${error}`);
+        });
 };
 
 /* Example of a stop object from the XML file
@@ -138,7 +159,9 @@ const buildStop = function (rawStop) {
             newStop.Id = nodeId;
             newStop.Name = _.get(rawStop, 'Name[0]', 'Nombre de la parada');
             let rawLines = _.get(rawStop, 'Lines[0]', '').split(' ');
+            let aLine = '';
             newStop.Lines = _.map(rawLines, function (rawLine) {
+                aLine = rawLine;
                 let temp = rawLine.split('/');
                 let label = findXmlLine(temp[0]).Label[0];
                 if (temp[1] === '1') {
@@ -147,8 +170,12 @@ const buildStop = function (rawStop) {
                     return `${label} vuelta`;
                 }
             });
+            getStopLocation(nodeId, aLine.split('/')[0], aLine.split('/')[1])
+                .then(function (position) {
+                    newStop.position = position;
+                    resolve(newStop);
+                });
         } else if (stopId !== -1) {
-            //debug(rawStop);
             // debug('Build from API');
             newStop.Id = stopId;
             newStop.Name = _.get(rawStop, 'name', 'Nombre de la parada');
@@ -160,10 +187,14 @@ const buildStop = function (rawStop) {
                     return `${label} vuelta`;
                 }
             });
+            newStop.position = {
+                latitude: rawStop.latitude,
+                longitude: rawStop.longitude
+            };
+            resolve(newStop);
         } else {
             reject('Bad raw stop');
         }
-        resolve(newStop);
     });
 };
 
@@ -258,7 +289,9 @@ const findStops = function (query, location) {
 
 const helpText =
         'This bot is intended to be used in inline mode, just type ' +
-        '@emtbusbot and a bus stop number to get an estimation.';
+        '@emtbusbot and a bus stop number to get an estimation.' +
+        '\r\nIf you allow your Telegram client to send your location, ' +
+        'you will be shown a list of the bus stops closer to you.';
 
 bot.onText(/\/start.*/, function (msg) {
     bot.sendMessage(msg.from.id, helpText);
@@ -328,7 +361,11 @@ bot.on('inline_query', function (request) {
                         return s;
                     }), '\r\n');
                 }
-                const content = `*${stop.Id}* ${stop.Name}\r\n${arriving}`;
+                let url = `https://www.google.com/maps/@${stop.position.latitude},${stop.position.longitude},19z`;
+                const content = `*${stop.Id}* ${stop.Name}
+${arriving}
+
+[¿Dónde está la parada?](${url})`;
                 const result = {type: 'article'};
                 result.id = uuid.v4();
                 result.title = `${stop.Id} - ${stop.Name}`;
