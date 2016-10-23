@@ -173,15 +173,16 @@ const findStops = function (query, location) {
         if (query.length === 0) {
             debug('Empty query');
             isEmptyQuery = true;
-            // Query must be a number
-            if (!isEmptyQuery && isNaN(+query)) {
-                debug('Query is not a number');
-                isNaNQuery = true;
-            }
+        }
+        // Query must be a number
+        if (!isEmptyQuery && isNaN(+query)) {
+            debug('Query is not a number');
+            isNaNQuery = true;
         }
         if (location.latitude !== 0 || location.longitude !== 0) {
             debug('Query contains location');
             isLocationQuery = true;
+            telemetryClient.trackEvent(telemetryEvents.QueryWithLocation);
         }
         if ((isEmptyQuery && !isLocationQuery) || isNaNQuery) {
             debug(`Query is empty and the user didn't send a location`);
