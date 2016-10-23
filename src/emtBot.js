@@ -16,6 +16,24 @@ const P = require('bluebird');
 
 const bot = new TelegramBot(settings.token, {polling: true});
 
+// Azure Application Insights /////////////////////////////////////////////////
+
+const appInsights = require("applicationinsights");
+const instrumentationKey = _.isNil(process.env.APPINSIGHTS_INSTRUMENTATIONKEY)
+    ? "testingKey"
+    : process.env.APPINSIGHTS_INSTRUMENTATIONKEY;
+appInsights
+    .setup(instrumentationKey)
+    .setAutoCollectRequests(false)
+    .start();
+const telemetryClient = appInsights.getClient(instrumentationKey);
+
+const telemetryEvents = {
+    InlineQuery: 'InlineQuery',
+    QueryWithLocation: 'QueryWithLocation',
+    QueryWithText: 'QueryWithText'
+};
+
 // Init EMT API ///////////////////////////////////////////////////////////////
 
 const xmlStops = xml2json(settings.emt_nodesxml).TABLA.DocumentElement[0].REG;
@@ -173,15 +191,16 @@ const findStops = function (query, location) {
         if (query.length === 0) {
             debug('Empty query');
             isEmptyQuery = true;
-            // Query must be a number
-            if (!isEmptyQuery && isNaN(+query)) {
-                debug('Query is not a number');
-                isNaNQuery = true;
-            }
+        }
+        // Query must be a number
+        if (!isEmptyQuery && isNaN(+query)) {
+            debug('Query is not a number');
+            isNaNQuery = true;
         }
         if (location.latitude !== 0 || location.longitude !== 0) {
             debug('Query contains location');
             isLocationQuery = true;
+            telemetryClient.trackEvent(telemetryEvents.QueryWithLocation);
         }
         if ((isEmptyQuery && !isLocationQuery) || isNaNQuery) {
             debug(`Query is empty and the user didn't send a location`);
@@ -193,6 +212,7 @@ const findStops = function (query, location) {
 
         if (!isEmptyQuery) {
             debug('Query is not empty, find a matching stop in the XML');
+            telemetryClient.trackEvent(telemetryEvents.QueryWithText);
             // Look for stops that start with that number in the DB
             foundByQuery = _.slice(xmlStops.filter(function (o) {
                 return _.startsWith(o.Node, query);
@@ -230,6 +250,9 @@ const findStops = function (query, location) {
                 }
                 debug(`Stops found: ${stopsFound.length}`);
                 resolve(_.slice(stopsFound, 0, settings.maxResults));
+            })
+            .catch(function (error) {
+                telemetryClient.trackException(error);
             });
     });
 };
@@ -270,6 +293,8 @@ bot.on('inline_query', function (request) {
     const location = _.get(request, 'location', {latitude: 0, longitude: 0});
     debug(`New inline query: ${query}`);
     debug(`Location: ${location.latitude} ${location.longitude}`);
+
+    telemetryClient.trackEvent(telemetryEvents.InlineQuery);
 
     findStops(query, location)
         .then(function (stops) {
@@ -323,9 +348,11 @@ bot.on('inline_query', function (request) {
             bot.answerInlineQuery(inlineId, results, {cache_time: 10});
         }, function (error) {
             console.error(error);
+            telemetryClient.trackException(error);
         })
         .catch(function (error) {
             logErrors(request.query, inlineId, error);
+            telemetryClient.trackException(error);
         });
     // logErrors(request.query, inlineId, 'No results');
 });
