@@ -284,6 +284,48 @@ const findStops = function (query, location) {
             });
     });
 };
+// We want to format the estimations in a table that it's easier to read
+// We pad the column text with spaces and render each line with a monospace font
+const columns = ['lineId', 'destination', 'time'];
+
+const renderStop = function (stop) {
+    return new P(function (resolve) {
+        let arriving = "Sin estimaciones";
+        if (stop.arriving.length > 0) {
+            let widths = getColumnWidths(stop, columns);
+            arriving = _.join(_.map(stop.arriving, function (e) {
+                // Build the bus arriving line, padding the columns as needed
+                let keys = _.keys(widths);
+                let s = _.map(keys, function (w) {
+                    let value = _.get(e, w, '');
+                    value = _.truncate(value, {
+                        length: settings.maxColumnWidth
+                    });
+                    value = _.padEnd(value, widths[w], ' ');
+                    return value;
+                });
+                s = '`' + _.join(s, ' ') + '`';
+                return s;
+            }), '\r\n');
+        }
+        let url = `https://www.google.com/maps/@${stop.position.latitude},${stop.position.longitude},19z`;
+        const content = `*${stop.Id}* ${stop.Name}
+${arriving}
+
+[¿Dónde está la parada?](${url})`;
+        const result = {type: 'article'};
+        result.id = uuid.v4();
+        result.title = `${stop.Id} - ${stop.Name}`;
+        result.input_message_content = {
+            message_text: content,
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true
+        };
+        result.description = 'Líneas: ' + _.join(stop.Lines, ', ');
+        result.thumb_url = settings.result_thumb;
+        resolve(result);
+    });
+};
 
 // COMMANDS ///////////////////////////////////////////////////////////////////
 
@@ -339,47 +381,11 @@ bot.on('inline_query', function (request) {
                 // If the result is a String, then an error ocurred
                 return _.isString(result);
             });
-            // We want to format the estimations in a table that it's easier to read
-            // We pad the column text with spaces and render each line with a monospace font
-            let columns = ['lineId', 'destination', 'time'];
-            let results = _.map(stops, function (stop) {
-                let arriving = "Sin estimaciones";
-                if (stop.arriving.length > 0) {
-                    let widths = getColumnWidths(stop, columns);
-                    arriving = _.join(_.map(stop.arriving, function (e) {
-                        // Build the bus arriving line, padding the columns as needed
-                        let keys = _.keys(widths);
-                        let s = _.map(keys, function (w) {
-                            let value = _.get(e, w, '');
-                            value = _.truncate(value, {
-                                length: settings.maxColumnWidth
-                            });
-                            value = _.padEnd(value, widths[w], ' ');
-                            return value;
-                        });
-                        s = '`' + _.join(s, ' ') + '`';
-                        return s;
-                    }), '\r\n');
-                }
-                let url = `https://www.google.com/maps/@${stop.position.latitude},${stop.position.longitude},19z`;
-                const content = `*${stop.Id}* ${stop.Name}
-${arriving}
-
-[¿Dónde está la parada?](${url})`;
-                const result = {type: 'article'};
-                result.id = uuid.v4();
-                result.title = `${stop.Id} - ${stop.Name}`;
-                result.input_message_content = {
-                    message_text: content,
-                    parse_mode: 'Markdown',
-                    disable_web_page_preview: true
-                };
-                result.description = 'Líneas: ' + _.join(stop.Lines, ', ');
-                result.thumb_url = settings.result_thumb;
-                return result;
-            });
-            debug(`Final results: ${results.length}`);
-            bot.answerInlineQuery(inlineId, results, {cache_time: 10});
+            return P.all(_.map(stops, renderStop))
+                .then(function (results) {
+                    debug(`Final results: ${results.length}`);
+                    bot.answerInlineQuery(inlineId, results, {cache_time: 10});
+                });
         }, function (error) {
             console.error(error);
             telemetryClient.trackException(error);
