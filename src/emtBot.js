@@ -33,11 +33,14 @@ const telemetryEvents = {
     QueryWithText: 'QueryWithText'
 };
 
-// Init EMT API ///////////////////////////////////////////////////////////////
+// CONSTANTS //////////////////////////////////////////////////////////////////
 
 const xmlStops = xml2json(settings.emt_nodesxml).TABLA.DocumentElement[0].REG;
 const xmlLines = xml2json(settings.emt_linesxml).TABLA.DocumentElement[0].REG;
 const searchRadius = 200;
+const emptyLocation = {latitude: 0, longitude: 0};
+// Properties of a stop that will be rendered in a table
+const columns = ['lineId', 'destination', 'time'];
 
 // UTILS //////////////////////////////////////////////////////////////////////
 /**
@@ -210,7 +213,7 @@ const logErrors = function (query, id, error) {
 * close to the location of the user.
 * Returns a Promise object that fulfills to an array of Stops.
 */
-const findStops = function (query, location) {
+const findStops = function (query, location, exact = false) {
     return new P(function (resolve, reject) {
         let isEmptyQuery = false;
         let isLocationQuery = false;
@@ -241,10 +244,16 @@ const findStops = function (query, location) {
         if (!isEmptyQuery) {
             debug('Query is not empty, find a matching stop in the XML');
             telemetryClient.trackEvent(telemetryEvents.QueryWithText);
-            // Look for stops that start with that number in the DB
-            foundByQuery = _.slice(xmlStops.filter(function (o) {
+            let findFunction = function (o) {
                 return _.startsWith(o.Node, query);
-            }), 0, settings.maxResults);
+            };
+            if (exact) {
+                findFunction = function (o) {
+                    return o.Node[0] === query;
+                };
+            }
+            // Look for stops that start with that number in the DB
+            foundByQuery = _.slice(xmlStops.filter(findFunction), 0, settings.maxResults);
         }
 
         debug('Calling EMT API to get stops by location');
@@ -286,8 +295,6 @@ const findStops = function (query, location) {
 };
 // We want to format the estimations in a table that it's easier to read
 // We pad the column text with spaces and render each line with a monospace font
-const columns = ['lineId', 'destination', 'time'];
-
 const renderStop = function (stop) {
     return new P(function (resolve) {
         let arriving = "Sin estimaciones";
@@ -323,6 +330,14 @@ ${arriving}
         };
         result.description = 'Líneas: ' + _.join(stop.Lines, ', ');
         result.thumb_url = settings.result_thumb;
+        result.reply_markup = {
+            inline_keyboard: [[
+                {
+                    text: "Actualizar",
+                    callback_data: `refresh:${stop.Id}`
+                }
+            ]]
+        };
         resolve(result);
     });
 };
@@ -362,7 +377,7 @@ Arriving example
 bot.on('inline_query', function (request) {
     const inlineId = request.id;
     const query = request.query.trim();
-    const location = _.get(request, 'location', {latitude: 0, longitude: 0});
+    const location = _.get(request, 'location', emptyLocation);
     debug(`New inline query: ${query}`);
     debug(`Location: ${location.latitude} ${location.longitude}`);
 
@@ -381,20 +396,84 @@ bot.on('inline_query', function (request) {
                 // If the result is a String, then an error ocurred
                 return _.isString(result);
             });
-            return P.all(_.map(stops, renderStop))
-                .then(function (results) {
-                    debug(`Final results: ${results.length}`);
-                    bot.answerInlineQuery(inlineId, results, {cache_time: 10});
-                });
-        }, function (error) {
-            console.error(error);
-            telemetryClient.trackException(error);
+            return P.all(_.map(stops, renderStop));
+        })
+        .then(function (results) {
+            debug(`Final results: ${results.length}`);
+            bot.answerInlineQuery(inlineId, results, {cache_time: 10});
         })
         .catch(function (error) {
-            logErrors(request.query, inlineId, error);
+            console.error(error);
             telemetryClient.trackException(error);
         });
     // logErrors(request.query, inlineId, 'No results');
+});
+
+const processRefresh = function (request, stopId) {
+    if (_.isNaN(+stopId)) {
+        debug('Bad refresh stopId');
+        return;
+    }
+    let answerText = 'Actualizando...';
+    bot.answerCallbackQuery(request.id, answerText);
+
+    // This is basically the same as in the inline query
+    findStops(stopId, emptyLocation, true)
+        .then(function (stops) {
+            if (stops.length !== 1) {
+                return P.reject('Error: more than one stop in refresh');
+                // This is a refresh, we should never get more than one result
+            }
+            return stops[0];
+        })
+        .then(getArrivingBuses)
+        .then(function (stop) {
+            if (_.isString(stop)) {
+                return P.reject('Error: getting arriving buses');
+            }
+            return stop;
+        })
+        .then(renderStop)
+        .then(function (result) {
+            bot.editMessageText(
+                result.input_message_content.message_text,
+                {
+                    inline_message_id: request.inline_message_id,
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [[
+                            {
+                                text: "Actualizar",
+                                callback_data: `refresh:${stopId}`
+                            }
+                        ]]
+                    }
+                }
+            );
+        })
+        .catch(function (error) {
+            console.error(error);
+            telemetryClient.trackException(error);
+        });
+};
+
+bot.on('callback_query', function (request) {
+    debug('New CallbackQuery');
+    const data = _.get(request, 'data', 0);
+    debug(`Callback query data: ${data}`);
+    try {
+        const operation = data.split(':')[0];
+        switch (operation) {
+        case 'refresh':
+            processRefresh(request, data.split(':')[1]);
+            break;
+        default:
+            bot.answerCallbackQuery(request.id);
+        }
+    } catch (error) {
+        console.error(`Bad callback data: ${error}`);
+        bot.answerCallbackQuery(request.id);
+    }
 });
 
 module.exports = bot;
