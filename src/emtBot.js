@@ -183,7 +183,7 @@ const findStops = function (query, location) {
             debug('Query contains location');
             isLocationQuery = true;
         }
-        if (isEmptyQuery && !isLocationQuery) {
+        if ((isEmptyQuery && !isLocationQuery) || isNaNQuery) {
             debug(`Query is empty and the user didn't send a location`);
             reject(`Query is empty and the user didn't send a location`);
         }
