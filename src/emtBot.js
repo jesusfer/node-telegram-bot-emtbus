@@ -25,24 +25,68 @@ const searchRadius = 200;
 EMTAPI.initAPICredentials(settings.emt_app_id, settings.emt_passkey);
 
 // UTILS //////////////////////////////////////////////////////////////////////
-
+/**
+* Look for a bus line in the Lines XML using the line Id, which is a 3 digit
+* code that identifies the line, but it's not the same as the label the line has
+* For example, the code 516 is the line N16.
+*/
 const findXmlLine = function (lineId) {
     return xmlLines.find(function (o) {
         return o.Line[0] === _.padStart(lineId, 3, 0);
     });
 };
 
-// Render a bus stop
+/**
+* Get the buses arriving to this stop and set the arriving property.
+* Returns a Promise object.
+*/
 const getArrivingBuses = function (stop) {
     // Return a promise
     return new P(function (resolve) {
-        EMTAPI.getIncomingBusesToStop(stop.Id).then(function (arriving) {
-            stop.arriving = arriving;
-            resolve(stop);
-        }).catch(function (error) {
-            resolve(`Error: ${error}`);
+        EMTAPI.getIncomingBusesToStop(stop.Id)
+            .then(function (arriving) {
+                stop.arriving = _.map(arriving, function (bus) {
+                    // Pretty print the arriving time
+                    let time = bus.busTimeLeft;
+                    let timeMin = _.floor(time / 60);
+                    if (time === 0 || timeMin === 0) {
+                        time = 'Llegando';
+                    } else if (time === 999999) {
+                        time = '+20 min';
+                    } else {
+                        time = timeMin + ' min';
+                    }
+                    bus.time = time;
+                    return bus;
+                });
+                resolve(stop);
+            })
+            .catch(function (error) {
+                resolve(`Error: ${error}`);
+            });
+    });
+};
+
+/**
+* In order to print the arriving times in a table-like fashion, we need to know
+* in advance the max width of each column's text so that we can pad each column
+* with spaces according to their width.
+*/
+const getColumnWidths = function (stop, columns) {
+    let format = {};
+    _.forEach(stop.arriving, function (bus) {
+        // bus is an arriving bus
+        _.forEach(columns, function (col) {
+            // col is a column that will be printed
+            let currentMax = _.get(format, col, 0);
+            // Enforce a max column width of so that the line is not too long
+            // Helps reading the results better in mobile phones.
+            let current = Math.min(_.get(bus, col, 0).length, settings.maxColumnWidth);
+            let max = Math.max(currentMax, current);
+            _.set(format, col, max);
         });
     });
+    return format;
 };
 
 /* Example of a stop object from the XML file
@@ -63,6 +107,11 @@ Stop object from API
     latitude: 40.377653538528,
     line: [Object]
 }
+*/
+
+/*
+* Since the stop objects are different in the REST API and the XML, we build
+* a new object to have a consistent object across the rest of the functions.
 */
 const buildStop = function (rawStop) {
     return new P(function (resolve, reject) {
@@ -109,26 +158,14 @@ const logErrors = function (query, id, error) {
     bot.answerInlineQuery(id, []);
 };
 
-// COMMANDS ///////////////////////////////////////////////////////////////////
-
-const helpText =
-        'This bot is intended to be used in inline mode, just type ' +
-        '@emtbusbot and a bus stop number to get an estimation.';
-
-bot.onText(/\/start.*/, function (msg) {
-    bot.sendMessage(msg.from.id, helpText);
-});
-
-bot.onText(/\/help.*/, function (msg) {
-    bot.sendMessage(msg.from.id, helpText);
-});
-
-// INLINE MODE ////////////////////////////////////////////////////////////////
-
+/**
+* Given a query text and a location object, both coming from the user, find
+* a list of stops whose stop ID start with the query of the user or that are
+* close to the location of the user.
+* Returns a Promise object that fulfills to an array of Stops.
+*/
 const findStops = function (query, location) {
     return new P(function (resolve, reject) {
-        debug(`Input query: ${query}`);
-        debug(`Input location: ${location.latitude} ${location.longitude}`);
         let isEmptyQuery = false;
         let isLocationQuery = false;
         let isNaNQuery = false;
@@ -165,18 +202,23 @@ const findStops = function (query, location) {
         debug('Calling EMT API to get stops by location');
         EMTAPI.getStopsFromLocation(location, searchRadius)
             .then(function (stops) {
+                // Got some strop from the location, convert the type
+                stops = _.slice(stops, 0, settings.maxResults);
                 return Promise.all(_.map(stops, buildStop));
             })
             .then(function (stopsByLocation) {
+                // Now we can add the converted to the results
                 debug(`Built by location: ${stopsByLocation.length}`);
                 stopsFound = _.concat(stopsFound, stopsByLocation);
             })
             .then(function () {
+                // Convert the stops from the query
                 return Promise.all(_.map(foundByQuery, buildStop));
             })
             .then(function (stopsByQuery) {
                 debug(`Built by query ${stopsByQuery.length}`);
                 if (stopsByQuery.length > 0) {
+                    // If there are stops from the query, we don't want by location
                     stopsFound = stopsByQuery;
                 }
             })
@@ -192,6 +234,21 @@ const findStops = function (query, location) {
     });
 };
 
+// COMMANDS ///////////////////////////////////////////////////////////////////
+
+const helpText =
+        'This bot is intended to be used in inline mode, just type ' +
+        '@emtbusbot and a bus stop number to get an estimation.';
+
+bot.onText(/\/start.*/, function (msg) {
+    bot.sendMessage(msg.from.id, helpText);
+});
+
+bot.onText(/\/help.*/, function (msg) {
+    bot.sendMessage(msg.from.id, helpText);
+});
+
+// TELEGRAM INLINE MODE ////////////////////////////////////////////////////////
 /*
 Arriving example
 {
@@ -212,36 +269,44 @@ bot.on('inline_query', function (request) {
     const query = request.query.trim();
     const location = _.get(request, 'location', {latitude: 0, longitude: 0});
     debug(`New inline query: ${query}`);
+    debug(`Location: ${location.latitude} ${location.longitude}`);
 
     findStops(query, location)
         .then(function (stops) {
+            // Once we have some stops, find the buses arriving to them
             debug(`We got ${stops.length} stops`);
             return P.all(_.map(stops, getArrivingBuses));
         })
         .then(function (stops) {
+            // Once we have the stop with the arriving buses, build the results
+            // we are going to return to Telegram
             stops = _.reject(stops, function (result) {
+                // If the result is a String, then an error ocurred
                 return _.isString(result);
             });
+            // We want to format the estimations in a table that it's easier to read
+            // We pad the column text with spaces and render each line with a monospace font
+            let columns = ['lineId', 'destination', 'time'];
             let results = _.map(stops, function (stop) {
                 let arriving = "Sin estimaciones";
                 if (stop.arriving.length > 0) {
+                    let widths = getColumnWidths(stop, columns);
                     arriving = _.join(_.map(stop.arriving, function (e) {
-                        let time = e.busTimeLeft;
-                        switch (time) {
-                        case 999999:
-                            time = '+20 min';
-                            break;
-                        case 0:
-                            time = 'En parada';
-                            break;
-                        default:
-                            time = _.round(time / 60) + ' min';
-                        }
-                        return `${e.lineId} ${e.destination} ${time}`;
+                        // Build the bus arriving line, padding the columns as needed
+                        let keys = _.keys(widths);
+                        let s = _.map(keys, function (w) {
+                            let value = _.get(e, w, '');
+                            value = _.truncate(value, {
+                                length: settings.maxColumnWidth
+                            });
+                            value = _.padEnd(value, widths[w], ' ');
+                            return value;
+                        });
+                        s = '`' + _.join(s, ' ') + '`';
+                        return s;
                     }), '\r\n');
                 }
-                const content = `*${stop.Id}* ${stop.Name}
-${arriving}`;
+                const content = `*${stop.Id}* ${stop.Name}\r\n${arriving}`;
                 const result = {type: 'article'};
                 result.id = uuid.v4();
                 result.title = `${stop.Id} - ${stop.Name}`;
@@ -257,7 +322,7 @@ ${arriving}`;
             debug(`Final results: ${results.length}`);
             bot.answerInlineQuery(inlineId, results, {cache_time: 10});
         }, function (error) {
-            console.log(error);
+            console.error(error);
         })
         .catch(function (error) {
             logErrors(request.query, inlineId, error);
