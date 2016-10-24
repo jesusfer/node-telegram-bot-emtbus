@@ -10,9 +10,10 @@ const settings = {
     emt_nodesxml: './data/NodesLines.xml',
 
     result_thumb: 'http://i.imgur.com/IG5PB4z.png',
-	// Max column width for the results table
-	// For small screen phones it's still too much
-    maxColumnWidth: 18
+    // Max column width for the results table
+    // For small screen phones it's still too much
+    maxColumnWidth: 18,
+    searchRadius: 200
 };
 
 module.exports = settings;

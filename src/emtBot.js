@@ -38,7 +38,6 @@ const telemetryEvents = {
 
 const xmlStops = xml2json(settings.emt_nodesxml).TABLA.DocumentElement[0].REG;
 const xmlLines = xml2json(settings.emt_linesxml).TABLA.DocumentElement[0].REG;
-const searchRadius = 200;
 const emptyLocation = {latitude: 0, longitude: 0};
 // Properties of a stop that will be rendered in a table
 const columns = ['lineId', 'destination', 'time'];
@@ -258,7 +257,7 @@ const findStops = function (query, location, exact = false) {
         }
 
         debug('Calling EMT API to get stops by location');
-        EMTAPI.getStopsFromLocation(location, searchRadius)
+        EMTAPI.getStopsFromLocation(location, settings.searchRadius)
             .then(function (stops) {
                 // Got some strop from the location, convert the type
                 stops = _.slice(stops, 0, settings.maxResults);
