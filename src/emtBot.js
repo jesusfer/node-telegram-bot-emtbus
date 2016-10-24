@@ -30,7 +30,8 @@ const telemetryClient = appInsights.getClient(instrumentationKey);
 const telemetryEvents = {
     InlineQuery: 'InlineQuery',
     QueryWithLocation: 'QueryWithLocation',
-    QueryWithText: 'QueryWithText'
+    QueryWithText: 'QueryWithText',
+    RefreshQuery: 'RefreshQuery'
 };
 
 // CONSTANTS //////////////////////////////////////////////////////////////////
@@ -465,6 +466,7 @@ bot.on('callback_query', function (request) {
         const operation = data.split(':')[0];
         switch (operation) {
         case 'refresh':
+            telemetryClient.trackEvent(telemetryEvents.RefreshQuery);
             processRefresh(request, data.split(':')[1]);
             break;
         default:
