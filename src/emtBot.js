@@ -184,7 +184,7 @@ const buildStop = function (rawStop) {
             newStop.Name = _.get(rawStop, 'name', 'Nombre de la parada');
             newStop.Lines = _.map(_.concat(rawStop.line, []), function (line) {
                 let label = line.line;
-                if (line.direction === 'A') {
+                if (line.direction === 'B') {
                     return `${label} ida`;
                 } else {
                     return `${label} vuelta`;
