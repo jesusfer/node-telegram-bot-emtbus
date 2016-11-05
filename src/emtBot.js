@@ -8,7 +8,7 @@ const EMTAPI = require('node-emtmad-bus-promise');
 const _ = require('lodash');
 const uuid = require('node-uuid');
 const xml2json = require('./xml2json.js');
-const debug = require('debug')('emtBot');
+const debug = require('debug')('node-telegram-bot-emtbus');
 const P = require('bluebird');
 
 // TELEGRAM BOT ///////////////////////////////////////////////////////////////
