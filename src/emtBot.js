@@ -8,7 +8,7 @@ const EMTAPI = require('node-emtmad-bus-promise');
 const _ = require('lodash');
 const uuid = require('node-uuid');
 const xml2json = require('./xml2json.js');
-const debug = require('debug')('emtBot');
+const debug = require('debug')('node-telegram-bot-emtbus');
 const P = require('bluebird');
 
 // TELEGRAM BOT ///////////////////////////////////////////////////////////////
@@ -185,7 +185,7 @@ const buildStop = function (rawStop) {
             newStop.Name = _.get(rawStop, 'name', 'Nombre de la parada');
             newStop.Lines = _.map(_.concat(rawStop.line, []), function (line) {
                 let label = line.line;
-                if (line.direction === 'A') {
+                if (line.direction === 'B') {
                     return `${label} ida`;
                 } else {
                     return `${label} vuelta`;
