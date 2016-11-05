@@ -140,8 +140,7 @@ Stop object from API
 {
     stopId: '2443',
     name: 'AV.ABRANTES-PZA.LASMENINAS',
-    postalAddress: 'Av.deAbrantes,
-    106',
+    postalAddress: 'Av.deAbrantes, 106',
     longitude: -3.7324823992585,
     latitude: 40.377653538528,
     line: [Object]
@@ -158,7 +157,7 @@ const buildStop = function (rawStop) {
         let nodeId = _.get(rawStop, "Node[0]", -1);
         let stopId = _.get(rawStop, "stopId", -1);
         if (nodeId !== -1) {
-            // debug('Build from XML');
+            // Build from XML
             newStop.Id = nodeId;
             newStop.Name = _.get(rawStop, 'Name[0]', 'Nombre de la parada');
             let rawLines = _.get(rawStop, 'Lines[0]', '').split(' ');
@@ -179,7 +178,7 @@ const buildStop = function (rawStop) {
                     resolve(newStop);
                 });
         } else if (stopId !== -1) {
-            // debug('Build from API');
+            // Build from API
             newStop.Id = stopId;
             newStop.Name = _.get(rawStop, 'name', 'Nombre de la parada');
             newStop.Lines = _.map(_.concat(rawStop.line, []), function (line) {
@@ -293,8 +292,11 @@ const findStops = function (query, location, exact = false) {
             });
     });
 };
-// We want to format the estimations in a table that it's easier to read
-// We pad the column text with spaces and render each line with a monospace font
+
+/**
+* We want to format the estimations in a table that it's easier to read
+* We pad the column text with spaces and render each line with a monospace font
+*/
 const renderStop = function (stop) {
     return new P(function (resolve) {
         let arriving = "Sin estimaciones";
