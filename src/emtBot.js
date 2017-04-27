@@ -23,7 +23,10 @@ const instrumentationKey = _.isNil(process.env.APPINSIGHTS_INSTRUMENTATIONKEY)
     : process.env.APPINSIGHTS_INSTRUMENTATIONKEY;
 appInsights
     .setup(instrumentationKey)
+    .setAutoCollectConsole(false)
+    .setAutoCollectPerformance(false)
     .setAutoCollectRequests(false)
+    .setAutoCollectDependencies(false)
     .start();
 const telemetryClient = appInsights.getClient(instrumentationKey);
 
