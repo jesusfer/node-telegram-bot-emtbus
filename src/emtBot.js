@@ -72,11 +72,11 @@ const getArrivingBuses = function (stop) {
                     let time = bus.busTimeLeft;
                     let timeMin = _.floor(time / 60);
                     if (time === 0 || timeMin === 0) {
-                        time = 'Llegando';
+                        time = '<<<';
                     } else if (time === 999999) {
-                        time = '+20 min';
+                        time = '+20';
                     } else {
-                        time = timeMin + ' min';
+                        time = timeMin + '';
                     }
                     _.set(bus, 'time', time);
                     return bus;
