@@ -319,11 +319,15 @@ const renderStop = function (stop) {
                 return s;
             }), '\r\n');
         }
-        let url = `https://www.google.com/maps/@${stop.position.latitude},${stop.position.longitude},19z`;
-        const content = `*${stop.Id}* ${stop.Name}
-${arriving}
+        let mapa = ""
+        if (stop.position != undefined) {
+            let url = `https://www.google.com/maps/@${stop.position.latitude},${stop.position.longitude},19z`;
+            mapa = `
 
 [¿Dónde está la parada?](${url})`;
+        }
+        const content = `*${stop.Id}* ${stop.Name}
+${arriving}${mapa}`;
         const result = {type: 'article'};
         result.id = uuid.v4();
         result.title = `${stop.Id} - ${stop.Name}`;
