@@ -261,7 +261,7 @@ const findStops = function (query, location, exact = false) {
         debug('Calling EMT API to get stops by location');
         EMTAPI.getStopsFromLocation(location, settings.searchRadius)
             .then(function (stops) {
-                // Got some strop from the location, convert the type
+                // Got some stops from the location, convert the type
                 stops = _.slice(stops, 0, settings.maxResults);
                 return Promise.all(_.map(stops, buildStop));
             })
@@ -284,7 +284,7 @@ const findStops = function (query, location, exact = false) {
             .then(function () {
                 // We now may have a list of stops, return then
                 if (stopsFound.length === 0) {
-                    // TODO We may want to return an error?
+                    // TODO: We may want to return an error?
                     debug('No stops found');
                 }
                 debug(`Stops found: ${stopsFound.length}`);
