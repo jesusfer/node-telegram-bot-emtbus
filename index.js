@@ -1,4 +1,4 @@
-// Copyright (c) 2016 Jesús Fernández <jesus@nublar.net>
+// Copyright (c) 2018 Jesús Fernández <jesus@nublar.net>
 // MIT License
 
 'use strict';
