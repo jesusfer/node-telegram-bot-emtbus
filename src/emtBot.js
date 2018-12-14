@@ -13,7 +13,7 @@ const P = require('bluebird');
 
 // TELEGRAM BOT ///////////////////////////////////////////////////////////////
 
-const bot = new TelegramBot(settings.token, {polling: true});
+const bot = new TelegramBot(settings.token, { polling: true });
 
 // Azure Application Insights /////////////////////////////////////////////////
 
@@ -21,6 +21,7 @@ const appInsights = require("applicationinsights");
 const instrumentationKey = _.isNil(process.env.APPINSIGHTS_INSTRUMENTATIONKEY)
     ? "testingKey"
     : process.env.APPINSIGHTS_INSTRUMENTATIONKEY;
+
 appInsights
     .setup(instrumentationKey)
     .setAutoCollectConsole(false)
@@ -28,7 +29,7 @@ appInsights
     .setAutoCollectRequests(false)
     .setAutoCollectDependencies(false)
     .start();
-const telemetryClient = appInsights.getClient(instrumentationKey);
+const telemetryClient = appInsights.defaultClient;
 
 const telemetryEvents = {
     InlineQuery: 'InlineQuery',
@@ -41,7 +42,7 @@ const telemetryEvents = {
 
 const xmlStops = xml2json(settings.emt_nodesxml).TABLA.DocumentElement[0].REG;
 const xmlLines = xml2json(settings.emt_linesxml).TABLA.DocumentElement[0].REG;
-const emptyLocation = {latitude: 0, longitude: 0};
+const emptyLocation = { latitude: 0, longitude: 0 };
 // Properties of a stop that will be rendered in a table
 const columns = ['lineId', 'destination', 'time'];
 
@@ -121,10 +122,12 @@ const getStopLocation = function (stopId, line, direction) {
             let stop = stops.find(function (stop) {
                 return stop.stopId === stopId;
             });
-            return {
+            let location = {
                 latitude: stop.latitude,
                 longitude: stop.longitude
             };
+            debug(`Location for stop ${stopId} and line ${line}/${direction}: ${location.latitude},${location.longitude}`);
+            return location;
         })
         .catch(function (error) {
             console.error(`Error: ${error}`);
@@ -267,7 +270,7 @@ const findStops = function (query, location, exact = false) {
             })
             .then(function (stopsByLocation) {
                 // Now we can add the converted to the results
-                debug(`Built by location: ${stopsByLocation.length}`);
+                debug(`Stops found with location: ${stopsByLocation.length}`);
                 stopsFound = _.concat(stopsFound, stopsByLocation);
             })
             .then(function () {
@@ -275,7 +278,7 @@ const findStops = function (query, location, exact = false) {
                 return Promise.all(_.map(foundByQuery, buildStop));
             })
             .then(function (stopsByQuery) {
-                debug(`Built by query ${stopsByQuery.length}`);
+                debug(`Stops found with query ${stopsByQuery.length}`);
                 if (stopsByQuery.length > 0) {
                     // If there are stops from the query, we don't want by location
                     stopsFound = stopsByQuery;
@@ -328,7 +331,7 @@ const renderStop = function (stop) {
         }
         const content = `*${stop.Id}* ${stop.Name}
 ${arriving}${mapa}`;
-        const result = {type: 'article'};
+        const result = { type: 'article' };
         result.id = uuid.v4();
         result.title = `${stop.Id} - ${stop.Name}`;
         result.input_message_content = {
@@ -408,7 +411,7 @@ bot.on('inline_query', function (request) {
         })
         .then(function (results) {
             debug(`Final results: ${results.length}`);
-            bot.answerInlineQuery(inlineId, results, {cache_time: 10});
+            bot.answerInlineQuery(inlineId, results, { cache_time: 10 });
         })
         .catch(function (error) {
             console.error(error);
@@ -484,5 +487,11 @@ bot.on('callback_query', function (request) {
         bot.answerCallbackQuery(request.id);
     }
 });
+
+// FUTURE: Act on use sending a location
+// bot.on('location', (msg) => {
+//     console.log(msg.location.latitude);
+//     console.log(msg.location.longitude);
+// });
 
 module.exports = bot;
