@@ -4,12 +4,16 @@
 
 const settings = require('./settings.js');
 const TelegramBot = require('node-telegram-bot-api');
+// FUTURE: seems like a better library https://github.com/Lorengamboa/EMT-library
 const EMTAPI = require('node-emtmad-bus-promise');
 const _ = require('lodash');
 const uuid = require('uuid');
 const xml2json = require('./xml2json.js');
-const debug = require('debug')('node-telegram-bot-emtbus');
+const debug = require('debug')('bot');
+const debugCache = require('debug')('bot-cache');
+const debugBuild = require('debug')('bot-build');
 const P = require('bluebird');
+const utm = require('utm');
 
 // TELEGRAM BOT ///////////////////////////////////////////////////////////////
 
@@ -17,9 +21,9 @@ const bot = new TelegramBot(settings.token, { polling: true });
 
 // Azure Application Insights /////////////////////////////////////////////////
 
-const appInsights = require("applicationinsights");
+const appInsights = require('applicationinsights');
 const instrumentationKey = _.isNil(process.env.APPINSIGHTS_INSTRUMENTATIONKEY)
-    ? "testingKey"
+    ? 'testingKey'
     : process.env.APPINSIGHTS_INSTRUMENTATIONKEY;
 
 appInsights
@@ -40,11 +44,56 @@ const telemetryEvents = {
 
 // CONSTANTS //////////////////////////////////////////////////////////////////
 
-const xmlStops = xml2json(settings.emt_nodesxml).TABLA.DocumentElement[0].REG;
 const xmlLines = xml2json(settings.emt_linesxml).TABLA.DocumentElement[0].REG;
 const emptyLocation = { latitude: 0, longitude: 0 };
+const utmXoffset = -110;
+const utmYoffset = -197;
+
 // Properties of a stop that will be rendered in a table
 const columns = ['lineId', 'destination', 'time'];
+
+// CACHES //////////////////////////////////////////////////////////////////////
+/**
+ * Cache of Stop objects indexed by their ID.
+ */
+var stopCache = {};
+
+function buildStopCache() {
+    debugCache('Stop cache: building...');
+    const maxId = 6500;
+    let firstId = 1,
+        step = 100,
+        timeout = 0,
+        timeoutStep = 2000;
+    while (firstId < maxId) {
+        loadStopBatch(firstId, firstId + step, timeout);
+        timeout += timeoutStep;
+        firstId += step;
+    }
+    debugCache('Stop cache: complete');
+}
+
+function loadStopBatch(first, last, timeout) {
+    setTimeout(function () {
+        EMTAPI.getNodesLines(_.range(first, last))
+            .then(function (results) {
+                debugCache(`Stop cache: results from ${first} to ${last}`);
+                return Promise.all(_.map(results, buildStop));
+            })
+            .then(function (stops) {
+                _.map(stops, function (item) {
+                    _.set(stopCache, item.Id, item);
+                });
+            })
+            .catch(function (err) {
+                debugCache(`Stop cache: Error: ${err} ${err.stack}`);
+                loadStopBatch(first, last, 0);
+            });
+    }, timeout);
+}
+
+buildStopCache();
+
 
 // UTILS //////////////////////////////////////////////////////////////////////
 /**
@@ -85,10 +134,9 @@ const getArrivingBuses = function (stop) {
                 resolve(stop);
             })
             .catch(function (error) {
-                console.error(error);
+                debug(`Error: ${error}`);
                 resolve(`Error: ${error}`);
             });
-
     });
 };
 
@@ -116,6 +164,28 @@ const getColumnWidths = function (stop, columns) {
 
 const getStopLocation = function (stopId, line, direction) {
     debug(`Getting location for stop ${stopId} with line ${line} and direction ${direction}`);
+    let cachedStop = stopCache.filter(function (o) {
+        return o.Node == stopId;
+    })[0];
+
+    if (cachedStop) {
+        debug(`Found cached stop for ${stopId}`);
+        let x, y, location;
+        try {
+            x = parseInt(cachedStop.PosxNode[0]) + utmXoffset;
+            y = parseInt(cachedStop.PosyNode[0]) + utmYoffset;
+            location = utm.toLatLon(x, y, 30, 'T');
+        }
+        catch (error) {
+            return new P(function (resolve, reject) {
+                reject(Error('Could not transform UTM to LatLon'));
+            });
+        }
+        debug(`Cached location: ${location.latitude},${location.longitude}`);
+        return new P(function (resolve) {
+            resolve(location);
+        });
+    }
     return EMTAPI.getStopsLine(line, direction)
         .then(function (results) {
             let stops = _.get(results, 'stop', []);
@@ -151,6 +221,14 @@ Stop object from API
     latitude: 40.377653538528,
     line: [Object]
 }
+
+From API Node:
+{ Wifi: '0',
+  node: 1,
+  name: 'Avenida Valdemarín-Blanca de Castilla',
+  lines: [ '', '161/1/1' ],
+  latitude: 40.47004454502,
+  longitude: -3.782887713069 }
 */
 
 /*
@@ -160,12 +238,14 @@ Stop object from API
 const buildStop = function (rawStop) {
     return new P(function (resolve, reject) {
         let newStop = {};
-        let nodeId = _.get(rawStop, "Node[0]", -1);
-        let stopId = _.get(rawStop, "stopId", -1);
+        let nodeId = _.get(rawStop, 'Node[0]', -1);
+        let stopId = _.get(rawStop, 'stopId', -1);
+        let node = _.get(rawStop, 'node', -1);
         if (nodeId !== -1) {
             // Build from XML
+            debugBuild(`StopBuild->Building stop from XML (${nodeId})`);
             newStop.Id = nodeId;
-            newStop.Name = _.get(rawStop, 'Name[0]', 'Nombre de la parada');
+            newStop.Name = _.get(rawStop, 'Name[0]', `Parada ${newStop.Id}`);
             let rawLines = _.get(rawStop, 'Lines[0]', '').split(' ');
             let aLine = '';
             newStop.Lines = _.map(rawLines, function (rawLine) {
@@ -185,8 +265,9 @@ const buildStop = function (rawStop) {
                 });
         } else if (stopId !== -1) {
             // Build from API
+            debugBuild(`StopBuild->Building stop from API:Stop (${stopId})`);
             newStop.Id = stopId;
-            newStop.Name = _.get(rawStop, 'name', 'Nombre de la parada');
+            newStop.Name = _.get(rawStop, 'name', `Parada ${newStop.Id}`);
             newStop.Lines = _.map(_.concat(rawStop.line, []), function (line) {
                 let label = line.line;
                 if (line.direction === 'B') {
@@ -200,8 +281,36 @@ const buildStop = function (rawStop) {
                 longitude: rawStop.longitude
             };
             resolve(newStop);
+        } else if (node !== -1) {
+            // Build from API NodesLines
+            debugBuild(`StopBuild->Building stop from API:Node (${node})`);
+            newStop.Id = node;
+            newStop.Name = _.get(rawStop, 'name', `Parada ${newStop.Id}`);
+            let rawLines = _.get(rawStop, 'lines', '').filter(x => x.length > 0);
+            newStop.Lines = _.map(rawLines, function (rawLine) {
+                let temp = rawLine.split('/');
+                // FIX: there may be missing lines in the XML too so this has to be built in some other way (API call)
+                let label = '';
+                try {
+                    label = findXmlLine(temp[0]).Label[0];
+                    if (temp[1] === '1') {
+                        return `${label} ida`;
+                    } else {
+                        return `${label} vuelta`;
+                    }
+                }
+                catch (err) {
+                    debugBuild(`StopBuild->Line '${rawLine}' not found`);
+                }
+            });
+            newStop.position = {
+                latitude: rawStop.latitude,
+                longitude: rawStop.longitude
+            };
+            resolve(newStop);
         } else {
-            reject('Bad raw stop');
+            debugBuild('Bad raw stop');
+            reject('StopBuild->Bad raw stop');
         }
     });
 };
@@ -232,6 +341,7 @@ const findStops = function (query, location, exact = false) {
         if (!isEmptyQuery && isNaN(+query)) {
             debug('Query is not a number');
             isNaNQuery = true;
+            isEmptyQuery = true;
         }
         if (location.latitude !== 0 || location.longitude !== 0) {
             debug('Query contains location');
@@ -239,72 +349,60 @@ const findStops = function (query, location, exact = false) {
             telemetryClient.trackEvent(telemetryEvents.QueryWithLocation);
         }
         if ((isEmptyQuery && !isLocationQuery) || isNaNQuery) {
-            debug(`Query is empty and the user didn't send a location`);
-            reject(`Query is empty and the user didn't send a location`);
+            debug('Query is empty and the user didn\'t send a location');
+            return reject('Query is empty and the user didn\'t send a location');
         }
 
         let foundByQuery = [];
         let stopsFound = [];
 
         if (!isEmptyQuery) {
-            debug('Query is not empty, find a matching stop in the XML');
+            debug('Query is not empty, find a matching stop in the cache');
             telemetryClient.trackEvent(telemetryEvents.QueryWithText);
             let findFunction = function (o) {
-                return _.startsWith(o.Node, query);
+                return _.startsWith(o, query);
             };
             if (exact) {
                 findFunction = function (o) {
-                    return o.Node[0] === query;
+                    return o == query;
                 };
             }
-            // Look for stops that start with that number in the DB
-            foundByQuery = _.slice(xmlStops.filter(findFunction), 0, settings.maxResults);
+            // Look for stops that start with that number in the cache
+            foundByQuery = _.slice(Object.keys(stopCache).filter(findFunction), 0, settings.maxResults);
+            if (foundByQuery.length > 0) {
+                // There was a query that matched some stops so return these
+                return resolve(Promise.all(_.map(foundByQuery, id => stopCache[id])));
+            }
+            else {
+                debug('The stop is not in the cache!!!');
+            }
         }
 
-        debug('Calling EMT API to get stops by location');
-        EMTAPI.getStopsFromLocation(location, settings.searchRadius)
+        debug('Query was empty, matching by location');
+        return EMTAPI.getStopsFromLocation(location, settings.searchRadius)
             .then(function (stops) {
-                // Got some stops from the location, convert the type
+                // Got some stops with the location, convert the type and limit results
                 stops = _.slice(stops, 0, settings.maxResults);
                 return Promise.all(_.map(stops, buildStop));
             })
             .then(function (stopsByLocation) {
                 // Now we can add the converted to the results
                 debug(`Stops found with location: ${stopsByLocation.length}`);
-                stopsFound = _.concat(stopsFound, stopsByLocation);
-            })
-            .then(function () {
-                // Convert the stops from the query
-                return Promise.all(_.map(foundByQuery, buildStop));
-            })
-            .then(function (stopsByQuery) {
-                debug(`Stops found with query ${stopsByQuery.length}`);
-                if (stopsByQuery.length > 0) {
-                    // If there are stops from the query, we don't want by location
-                    stopsFound = stopsByQuery;
-                }
-            })
-            .then(function () {
-                // We now may have a list of stops, return then
-                if (stopsFound.length === 0) {
-                    // TODO: We may want to return an error?
-                    debug('No stops found');
-                }
-                debug(`Stops found: ${stopsFound.length}`);
-                resolve(_.slice(stopsFound, 0, settings.maxResults));
+                resolve(_.concat(stopsFound, stopsByLocation));
             })
             .catch(function (error) {
                 telemetryClient.trackException(error);
             });
     });
 };
+
 /**
 * We want to format the estimations in a table that it's easier to read
 * We pad the column text with spaces and render each line with a monospace font
 */
 const renderStop = function (stop) {
     return new P(function (resolve) {
-        let arriving = "Sin estimaciones";
+        let arriving = 'Sin estimaciones';
         if (stop.arriving.length > 0) {
             let widths = getColumnWidths(stop, columns);
             arriving = _.join(_.map(stop.arriving, function (e) {
@@ -322,7 +420,7 @@ const renderStop = function (stop) {
                 return s;
             }), '\r\n');
         }
-        let mapa = ""
+        let mapa = '';
         if (stop.position != undefined) {
             let url = `https://www.google.com/maps/@${stop.position.latitude},${stop.position.longitude},19z`;
             mapa = `
@@ -344,7 +442,7 @@ ${arriving}${mapa}`;
         result.reply_markup = {
             inline_keyboard: [[
                 {
-                    text: "Actualizar",
+                    text: 'Actualizar',
                     callback_data: `refresh:${stop.Id}`
                 }
             ]]
@@ -356,10 +454,10 @@ ${arriving}${mapa}`;
 // COMMANDS ///////////////////////////////////////////////////////////////////
 
 const helpText =
-        'This bot is intended to be used in inline mode, just type ' +
-        '@emtbusbot and a bus stop number to get an estimation.' +
-        '\r\nIf you allow your Telegram client to send your location, ' +
-        'you will be shown a list of the bus stops closer to you.';
+    'This bot is intended to be used in inline mode, just type ' +
+    '@emtbusbot and a bus stop number to get an estimation.' +
+    '\r\nIf you allow your Telegram client to send your location, ' +
+    'you will be shown a list of the bus stops closer to you.';
 
 bot.onText(/\/start.*/, function (msg) {
     bot.sendMessage(msg.from.id, helpText);
@@ -426,6 +524,7 @@ const processRefresh = function (request, stopId) {
         return;
     }
     let answerText = 'Actualizando...';
+    // TODO: The method signature answerCallbackQuery(callbackQueryId, text, showAlert) has been deprecated since v0.27.1
     bot.answerCallbackQuery(request.id, answerText);
 
     // This is basically the same as in the inline query
@@ -454,7 +553,7 @@ const processRefresh = function (request, stopId) {
                     reply_markup: {
                         inline_keyboard: [[
                             {
-                                text: "Actualizar",
+                                text: 'Actualizar',
                                 callback_data: `refresh:${stopId}`
                             }
                         ]]
@@ -475,12 +574,12 @@ bot.on('callback_query', function (request) {
     try {
         const operation = data.split(':')[0];
         switch (operation) {
-        case 'refresh':
-            telemetryClient.trackEvent(telemetryEvents.RefreshQuery);
-            processRefresh(request, data.split(':')[1]);
-            break;
-        default:
-            bot.answerCallbackQuery(request.id);
+            case 'refresh':
+                telemetryClient.trackEvent(telemetryEvents.RefreshQuery);
+                processRefresh(request, data.split(':')[1]);
+                break;
+            default:
+                bot.answerCallbackQuery(request.id);
         }
     } catch (error) {
         console.error(`Bad callback data: ${error}`);
