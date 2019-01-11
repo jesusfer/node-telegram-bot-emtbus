@@ -17,14 +17,16 @@ const utm = require('utm');
 
 // TELEGRAM BOT ///////////////////////////////////////////////////////////////
 
-const bot = new TelegramBot(settings.token, { polling: true });
+const bot = new TelegramBot(settings.token, {
+    polling: true
+});
 
 // Azure Application Insights /////////////////////////////////////////////////
 
 const appInsights = require('applicationinsights');
-const instrumentationKey = _.isNil(process.env.APPINSIGHTS_INSTRUMENTATIONKEY)
-    ? 'testingKey'
-    : process.env.APPINSIGHTS_INSTRUMENTATIONKEY;
+const instrumentationKey = _.isNil(process.env.APPINSIGHTS_INSTRUMENTATIONKEY) ?
+    'testingKey' :
+    process.env.APPINSIGHTS_INSTRUMENTATIONKEY;
 
 appInsights
     .setup(instrumentationKey)
@@ -45,7 +47,10 @@ const telemetryEvents = {
 // CONSTANTS //////////////////////////////////////////////////////////////////
 
 const xmlLines = xml2json(settings.emt_linesxml).TABLA.DocumentElement[0].REG;
-const emptyLocation = { latitude: 0, longitude: 0 };
+const emptyLocation = {
+    latitude: 0,
+    longitude: 0
+};
 const utmXoffset = -110;
 const utmYoffset = -197;
 
@@ -97,10 +102,10 @@ buildStopCache();
 
 // UTILS //////////////////////////////////////////////////////////////////////
 /**
-* Look for a bus line in the Lines XML using the line Id, which is a 3 digit
-* code that identifies the line, but it's not the same as the label the line has
-* For example, the code 516 is the line N16.
-*/
+ * Look for a bus line in the Lines XML using the line Id, which is a 3 digit
+ * code that identifies the line, but it's not the same as the label the line has
+ * For example, the code 516 is the line N16.
+ */
 const findXmlLine = function (lineId) {
     return xmlLines.find(function (o) {
         return o.Line[0] === _.padStart(lineId, 3, 0);
@@ -108,9 +113,9 @@ const findXmlLine = function (lineId) {
 };
 
 /**
-* Get the buses arriving to this stop and set the arriving property.
-* Returns a Promise object.
-*/
+ * Get the buses arriving to this stop and set the arriving property.
+ * Returns a Promise object.
+ */
 const getArrivingBuses = function (stop) {
     // Return a promise
     return new P(function (resolve) {
@@ -141,10 +146,10 @@ const getArrivingBuses = function (stop) {
 };
 
 /**
-* In order to print the arriving times in a table-like fashion, we need to know
-* in advance the max width of each column's text so that we can pad each column
-* with spaces according to their width.
-*/
+ * In order to print the arriving times in a table-like fashion, we need to know
+ * in advance the max width of each column's text so that we can pad each column
+ * with spaces according to their width.
+ */
 const getColumnWidths = function (stop, columns) {
     let format = {};
     _.forEach(stop.arriving, function (bus) {
@@ -175,8 +180,7 @@ const getStopLocation = function (stopId, line, direction) {
             x = parseInt(cachedStop.PosxNode[0]) + utmXoffset;
             y = parseInt(cachedStop.PosyNode[0]) + utmYoffset;
             location = utm.toLatLon(x, y, 30, 'T');
-        }
-        catch (error) {
+        } catch (error) {
             return new P(function (resolve, reject) {
                 reject(Error('Could not transform UTM to LatLon'));
             });
@@ -232,9 +236,9 @@ From API Node:
 */
 
 /*
-* Since the stop objects are different in the REST API and the XML, we build
-* a new object to have a consistent object across the rest of the functions.
-*/
+ * Since the stop objects are different in the REST API and the XML, we build
+ * a new object to have a consistent object across the rest of the functions.
+ */
 const buildStop = function (rawStop) {
     return new P(function (resolve, reject) {
         let newStop = {};
@@ -298,8 +302,7 @@ const buildStop = function (rawStop) {
                     } else {
                         return `${label} vuelta`;
                     }
-                }
-                catch (err) {
+                } catch (err) {
                     debugBuild(`StopBuild->Line '${rawLine}' not found`);
                 }
             });
@@ -322,11 +325,11 @@ const logErrors = function (query, id, error) {
 };
 
 /**
-* Given a query text and a location object, both coming from the user, find
-* a list of stops whose stop ID start with the query of the user or that are
-* close to the location of the user.
-* Returns a Promise object that fulfills to an array of Stops.
-*/
+ * Given a query text and a location object, both coming from the user, find
+ * a list of stops whose stop ID start with the query of the user or that are
+ * close to the location of the user.
+ * Returns a Promise object that fulfills to an array of Stops.
+ */
 const findStops = function (query, location, exact = false) {
     return new P(function (resolve, reject) {
         let isEmptyQuery = false;
@@ -372,8 +375,7 @@ const findStops = function (query, location, exact = false) {
             if (foundByQuery.length > 0) {
                 // There was a query that matched some stops so return these
                 return resolve(Promise.all(_.map(foundByQuery, id => stopCache[id])));
-            }
-            else {
+            } else {
                 debug('The stop is not in the cache!!!');
             }
         }
@@ -397,9 +399,9 @@ const findStops = function (query, location, exact = false) {
 };
 
 /**
-* We want to format the estimations in a table that it's easier to read
-* We pad the column text with spaces and render each line with a monospace font
-*/
+ * We want to format the estimations in a table that it's easier to read
+ * We pad the column text with spaces and render each line with a monospace font
+ */
 const renderStop = function (stop) {
     return new P(function (resolve) {
         let arriving = 'Sin estimaciones';
@@ -429,7 +431,9 @@ const renderStop = function (stop) {
         }
         const content = `*${stop.Id}* ${stop.Name}
 ${arriving}${mapa}`;
-        const result = { type: 'article' };
+        const result = {
+            type: 'article'
+        };
         result.id = uuid.v4();
         result.title = `${stop.Id} - ${stop.Name}`;
         result.input_message_content = {
@@ -440,12 +444,12 @@ ${arriving}${mapa}`;
         result.description = 'Líneas: ' + _.join(stop.Lines, ', ');
         result.thumb_url = settings.result_thumb;
         result.reply_markup = {
-            inline_keyboard: [[
-                {
+            inline_keyboard: [
+                [{
                     text: 'Actualizar',
                     callback_data: `refresh:${stop.Id}`
-                }
-            ]]
+                }]
+            ]
         };
         resolve(result);
     });
@@ -509,7 +513,9 @@ bot.on('inline_query', function (request) {
         })
         .then(function (results) {
             debug(`Final results: ${results.length}`);
-            bot.answerInlineQuery(inlineId, results, { cache_time: 10 });
+            bot.answerInlineQuery(inlineId, results, {
+                cache_time: 10
+            });
         })
         .catch(function (error) {
             console.error(error);
@@ -523,9 +529,10 @@ const processRefresh = function (request, stopId) {
         debug('Bad refresh stopId');
         return;
     }
-    let answerText = 'Actualizando...';
-    // TODO: The method signature answerCallbackQuery(callbackQueryId, text, showAlert) has been deprecated since v0.27.1
-    bot.answerCallbackQuery(request.id, answerText);
+    let options = {
+        'answerText': 'Actualizando...'
+    };
+    bot.answerCallbackQuery(request.id, options);
 
     // This is basically the same as in the inline query
     findStops(stopId, emptyLocation, true)
@@ -546,17 +553,16 @@ const processRefresh = function (request, stopId) {
         .then(renderStop)
         .then(function (result) {
             bot.editMessageText(
-                result.input_message_content.message_text,
-                {
+                result.input_message_content.message_text, {
                     inline_message_id: request.inline_message_id,
                     parse_mode: 'Markdown',
                     reply_markup: {
-                        inline_keyboard: [[
-                            {
+                        inline_keyboard: [
+                            [{
                                 text: 'Actualizar',
                                 callback_data: `refresh:${stopId}`
-                            }
-                        ]]
+                            }]
+                        ]
                     }
                 }
             );
